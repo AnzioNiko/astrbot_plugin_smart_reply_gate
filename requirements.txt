@@ -1,0 +1,2 @@
+--extra-index-url https://core-packages.elsai.ai/root/elsai-model/
+elsai-model[typesafe]==2.1.3
