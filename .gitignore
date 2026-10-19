@@ -3,3 +3,4 @@ __pycache__/
 data/
 .env
 .env.*
+/需求文档.md
