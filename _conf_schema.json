@@ -4,7 +4,7 @@
     "description": "关键词触发词",
     "default": [],
     "items": {"type": "string"},
-    "hint": "使用“添加更多”逐项添加关键词；消息正文包含任意一项就触发插件回复流程。判断器总开关开启时会先判断是否回复，即使该消息同时 @BOT 也可能被拦截；关闭时直接进入普通 LLM 回复。已标记为 AstrBot 官方唤醒或其他插件触发的消息会跳过本插件。列表为空则关闭关键词规则。它与 AstrBot 官方唤醒词不同：本规则可在消息任意位置匹配，不是工具指令。",
+    "hint": "每项一个关键词，消息正文包含任一项即触发；留空关闭。关键词可在任意位置匹配，不同于 AstrBot 官方唤醒词。",
     "obvious_hint": true
   },
   "regex_rules": {
@@ -12,28 +12,108 @@
     "description": "正则触发规则",
     "default": [],
     "items": {"type": "string"},
-    "hint": "使用“添加更多”逐项添加正则表达式；任一规则在消息正文任意位置匹配即触发插件回复流程。判断器总开关开启时会先判断是否回复，即使该消息同时 @BOT 也可能被拦截；关闭时直接进入普通 LLM 回复。已标记为 AstrBot 官方唤醒或其他插件触发的消息会跳过本插件。列表为空则关闭正则规则。它与 AstrBot 官方唤醒词不同：本规则可在消息任意位置匹配，不是工具指令。",
+    "hint": "每项一个正则表达式，正文任意位置匹配任一规则即触发；留空关闭。无效表达式会记录错误并忽略。",
+    "obvious_hint": true
+  },
+  "active_reply_enabled": {
+    "type": "bool",
+    "description": "启用群聊主动回复",
+    "default": false,
+    "hint": "关键词、正则、@BOT、引用BOT本人和跟进窗口以外的群消息才参与主动回复。关闭后不进行随机抽样。",
+    "obvious_hint": true
+  },
+  "active_probability": {
+    "type": "int",
+    "description": "每条群消息主动抽样概率（百分比）",
+    "default": 10,
+    "hint": "每条候选群消息独立抽中的概率，范围 0–100，默认 10%。未抽中不会调用判断器或主模型。",
+    "condition": {"active_reply_enabled": true},
+    "obvious_hint": true
+  },
+  "group_whitelist": {
+    "type": "list",
+    "description": "主动回复群白名单",
+    "default": [],
+    "hint": "留空时所有群可参与；填写群号后仅列出的群参与主动回复抽样。",
+    "condition": {"active_reply_enabled": true},
+    "obvious_hint": true
+  },
+  "debug_sample_logging": {
+    "type": "bool",
+    "description": "调试：记录随机抽样结果",
+    "default": false,
+    "hint": "默认关闭。开启后记录每次主动回复抽中或未抽中的结果；关闭可减少常规日志。",
+    "condition": {"active_reply_enabled": true},
+    "obvious_hint": true
+  },
+  "limiter_mode": {
+    "type": "string",
+    "description": "主动回复限频模式",
+    "options": ["固定冷却", "能量模式"],
+    "default": "固定冷却",
+    "hint": "抽中后检查限频：固定冷却按时间间隔限制，能量模式消耗并恢复每群能量。",
+    "condition": {"active_reply_enabled": true},
+    "obvious_hint": true
+  },
+  "fixed_cooldown_seconds": {
+    "type": "int",
+    "description": "每群固定冷却时长（秒）",
+    "default": 300,
+    "hint": "固定冷却下，主动回复发送成功后，该群需等待的秒数。",
+    "condition": {"active_reply_enabled": true, "limiter_mode": "固定冷却"},
+    "obvious_hint": true
+  },
+  "energy_capacity": {
+    "type": "int",
+    "description": "每群能量上限",
+    "default": 100,
+    "hint": "能量模式下每群独立储存的上限，初次使用为满能量。",
+    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
+    "obvious_hint": true
+  },
+  "energy_cost": {
+    "type": "int",
+    "description": "主动回复成功后消耗能量",
+    "default": 30,
+    "hint": "能量模式下，每次主动回复发送成功后扣除的点数。",
+    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
+    "obvious_hint": true
+  },
+  "energy_recover_seconds": {
+    "type": "int",
+    "description": "恢复 1 点能量所需秒数",
+    "default": 30,
+    "hint": "每经过设置的秒数恢复 1 点能量，默认 30 秒。",
+    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
+    "obvious_hint": true
+  },
+  "energy_threshold": {
+    "type": "string",
+    "description": "主动抽样能量门槛",
+    "default": "50",
+    "hint": "能量模式中，抽中后至少达到该能量才进入判断；留空时跟随每次主动回复消耗值。",
+    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
     "obvious_hint": true
   },
   "private_rules_enabled": {
     "type": "bool",
     "description": "私聊应用插件规则",
     "default": false,
-    "hint": "关闭时私聊保持 AstrBot 原有处理；开启后，私聊只有命中上方关键词或正则才进入插件回复流程。判断器总开关开启时还须通过判断器；未命中时阻止 AstrBot 默认回复。",
+    "hint": "开启后，私聊须命中关键词或正则才进入插件流程，未命中会阻止默认回复；关闭时交给 AstrBot 原逻辑。",
     "obvious_hint": true
   },
   "judge_enabled": {
     "type": "bool",
     "description": "启用是否回复判断",
     "default": true,
-    "hint": "默认开启。关键词/正则、开启判断的 @BOT/引用BOT本人消息及跟进窗口消息进入判断器。普通群消息（包括 @其他人或引用他人消息）只有在主动回复已开启、群白名单允许、概率抽中且冷却/能量检查通过后才调用判断器；未抽中或限频时不请求判断模型。已标记为 AstrBot 官方唤醒、其他插件命令或机器人自身消息会跳过本插件；对已匹配的其他插件命令，本插件还会阻止 AstrBot 默认主模型重复回复命令文本，但不会中断命令插件。关闭后，符合插件触发条件的消息跳过判断器并直接放行主模型；判断器设置会隐藏。",
+    "hint": "开启后，符合插件规则的消息会先判断是否值得回复。关闭后直接放行主模型，判断器设置会隐藏。",
     "obvious_hint": true
   },
   "judge_mentions_and_quotes": {
     "type": "bool",
     "description": "判断 @BOT 和引用BOT本人消息",
     "default": true,
-    "hint": "默认开启。群聊中 @ 本机器人（按机器人的 QQ 号识别）或引用/回复机器人的消息（按被引用消息的发送者 ID 识别）会直接经过是否回复判断。@其他人或引用他人消息不会被当作机器人定向消息；主动回复开启时，它们仍先经过群白名单、概率抽样和冷却/能量检查。关闭后，@BOT 和引用BOT本人消息不因 @ 或引用本身进入判断，并沿用 AstrBot 默认处理；命中关键词/正则时仍按明确触发规则判断，处于跟进窗口时仍由跟进窗口判断开关控制。",
+    "hint": "开启时，@本机器人或引用机器人本人的消息也进入判断。关闭后这些消息沿用 AstrBot 默认处理。",
     "condition": {"judge_enabled": true},
     "obvious_hint": true
   },
@@ -43,7 +123,7 @@
     "options": ["AstrBot Provider", "TypeSafe"],
     "labels": ["AstrBot 已配置模型", "TypeSafe 官方分类器"],
     "default": "AstrBot Provider",
-    "hint": "首次安装默认使用 AstrBot Provider。下方会根据此选项显示对应的判断器设置。",
+    "hint": "选择使用 AstrBot 已配置模型或 TypeSafe 分类器。",
     "condition": {"judge_enabled": true},
     "obvious_hint": true
   },
@@ -52,7 +132,7 @@
     "_special": "select_provider",
     "description": "AstrBot 判断 Provider",
     "default": "",
-    "hint": "从 AstrBot 已添加的 Provider 中选择，仅在判断器模式为 AstrBot Provider 时使用。留空时自动使用当前对话模型。此 Provider 只做是否回复的判断，不是主回复模型。",
+    "hint": "从 AstrBot 已配置的 Provider 中选择；留空使用当前对话模型。",
     "condition": {"judge_enabled": true, "judge_mode": "AstrBot Provider"},
     "obvious_hint": true
   },
@@ -60,7 +140,7 @@
     "type": "string",
     "description": "TypeSafe 模型 ID",
     "default": "jev-latest",
-    "hint": "仅在判断器模式为 TypeSafe 时使用。API Key 从 AstrBot 进程环境变量 TYPESAFE_API_KEY 读取，不存储在插件设置中。模型 ID 默认为 jev-latest，可选填其他 TypeSafe 模型 ID。",
+    "hint": "默认 jev-latest。API Key 从环境变量 TYPESAFE_API_KEY 读取，不保存在插件设置中。",
     "condition": {"judge_enabled": true, "judge_mode": "TypeSafe"},
     "obvious_hint": true
   },
@@ -70,7 +150,7 @@
     "options": ["Noul", "Score"],
     "labels": ["二元判断（Noul）", "五级评分（Score）"],
     "default": "Noul",
-    "hint": "TypeSafe Noul 输出 0–1 权重并使用下方 Noul 阈值；普通 AstrBot Provider 的 Noul 是布尔判断，不应用数值阈值。Score 模式使用内置五级标准，并使用最低分数阈值。",
+    "hint": "Noul 返回二元权重；Score 返回 1–5 分。AstrBot Provider 的 Noul 直接使用布尔结果。",
     "condition": {"judge_enabled": true},
     "obvious_hint": true
   },
@@ -78,7 +158,7 @@
     "type": "float",
     "description": "TypeSafe Noul 放行阈值",
     "default": 0.5,
-    "hint": "TypeSafe Noul 输出 0–1 的判断权重，达到阈值即放行；默认 0.5。AstrBot Provider 的二元结果直接返回允许或拒绝。",
+    "hint": "TypeSafe Noul 达到该权重才允许回复；范围 0–1，默认 0.5。",
     "condition": {"judge_enabled": true, "decision_mode": "Noul", "judge_mode": "TypeSafe"},
     "obvious_hint": true
   },
@@ -86,7 +166,7 @@
     "type": "int",
     "description": "Score 最低放行分数",
     "default": 3,
-    "hint": "取值 1–5，达到最低分数即放行；AstrBot Provider 和 TypeSafe 的 Score 模式都会使用此阈值，默认 3。",
+    "hint": "Score 模式的放行最低分，范围 1–5，默认 3；AstrBot Provider 和 TypeSafe 通用。",
     "condition": {"judge_enabled": true, "decision_mode": "Score"},
     "obvious_hint": true
   },
@@ -94,7 +174,7 @@
     "type": "text",
     "description": "是否值得回复的判断说明",
     "default": "判断这条消息是否值得机器人回复。\n如果消息明确在向机器人提问、请求帮助，或需要机器人补充信息，倾向于回复。\n如果消息是与机器人无关的闲聊、重复内容、纯表情或无需回应的陈述，倾向于不回复。\n结合最近对话和当前人格提示词判断消息中的称呼、自称或别名是否指向机器人；如果消息是在叫机器人并向它问候、提问、请求帮助或自然接话，倾向于回复。\n仅仅出现机器人名字或触发词、但没有交流意图时，不要自动判定值得回复。",
-    "hint": "可编辑的判断标准；判断请求会携带当前消息、最近 5 条对话及当前会话使用的人格提示词。人格提示词用于帮助识别机器人的身份、名称和别名。",
+    "hint": "传给判断模型的标准。请求还会包含当前消息、最近 5 条对话和当前人格提示词。",
     "condition": {"judge_enabled": true},
     "obvious_hint": true
   },
@@ -102,7 +182,7 @@
     "type": "int",
     "description": "判断请求超时秒数",
     "default": 8,
-    "hint": "判断模型单次请求的超时时间。关键词/正则触发超时后放行主模型；主动回复超时后跳过本次回复。",
+    "hint": "判断模型单次请求超时。明确触发超时后放行主模型，主动抽样超时后跳过回复。",
     "condition": {"judge_enabled": true},
     "obvious_hint": true
   },
@@ -110,94 +190,22 @@
     "type": "bool",
     "description": "调试：记录判断请求耗时",
     "default": false,
-    "hint": "默认关闭。开启后，每次调用判断模型都会在日志中记录从发出请求到收到响应的耗时；请求失败或超时时也会记录已耗时。不包含上下文准备、结果解析和主模型回复时间。",
+    "hint": "默认关闭。开启后记录每次判断请求的往返耗时，失败或超时也会记录。",
     "condition": {"judge_enabled": true},
-    "obvious_hint": true
-  },
-  "active_reply_enabled": {
-    "type": "bool",
-    "description": "启用群聊主动回复",
-    "default": false,
-    "hint": "默认关闭。开启后，未命中关键词/正则、未 @BOT、未引用BOT本人消息且不在跟进窗口的群消息（包括 @其他人或引用他人消息），先检查群白名单并进行概率抽样；抽中后再检查冷却/能量，全部通过后才调用判断器。未抽中、群不在白名单或限频未通过时不请求判断模型。已标记为 AstrBot 官方唤醒、其他插件命令或机器人自身消息会跳过本插件。本开关控制这些群消息的主动回复候选。",
-    "obvious_hint": true
-  },
-  "active_probability": {
-    "type": "int",
-    "description": "每条群消息主动抽样概率（百分比）",
-    "default": 10,
-    "hint": "0–100%，每条符合主动回复条件的群消息独立抽样。未抽中时记录结果并阻止本次默认主模型请求；抽中后才检查冷却/能量并进入判断。关键词/正则、@BOT、引用BOT本人消息和跟进窗口消息不走主动抽样；@其他人或引用他人消息仍参与抽样。",
-    "condition": {"active_reply_enabled": true},
-    "obvious_hint": true
-  },
-  "group_whitelist": {
-    "type": "list",
-    "description": "主动回复群白名单",
-    "default": [],
-    "hint": "留空时所有群可参与主动抽样；填写群号后仅白名单内群进入主动回复抽样和后续判断。白名单外的普通群消息不请求判断模型。关键词/正则、@BOT、引用BOT本人消息和跟进窗口消息不受此白名单和主动回复开关限制；@其他人或引用他人消息受白名单限制。",
-    "condition": {"active_reply_enabled": true},
-    "obvious_hint": true
-  },
-  "limiter_mode": {
-    "type": "string",
-    "description": "主动回复限频模式",
-    "options": ["固定冷却", "能量模式"],
-    "default": "固定冷却",
-    "hint": "两种模式二选一。普通群消息先概率抽样，抽中后再检查固定冷却或能量；限频未通过时记录结果并阻止判断器和默认主模型请求。关键词或正则明确触发不受限。",
-    "condition": {"active_reply_enabled": true},
-    "obvious_hint": true
-  },
-  "fixed_cooldown_seconds": {
-    "type": "int",
-    "description": "每群固定冷却时长（秒）",
-    "default": 300,
-    "hint": "仅固定冷却模式生效。主动回复实际发送成功后开始计时，默认 300 秒（5 分钟）。",
-    "condition": {"active_reply_enabled": true, "limiter_mode": "固定冷却"},
-    "obvious_hint": true
-  },
-  "energy_capacity": {
-    "type": "int",
-    "description": "每群能量上限",
-    "default": 100,
-    "hint": "仅能量模式生效。每群独立计算，首次启用时从满能量开始；状态持久化并在重启后按停机时间恢复。",
-    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
-    "obvious_hint": true
-  },
-  "energy_cost": {
-    "type": "int",
-    "description": "主动回复成功后消耗能量",
-    "default": 30,
-    "hint": "仅能量模式生效。仅主动回复实际发送成功后扣除，关键词或正则触发不消耗能量。",
-    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
-    "obvious_hint": true
-  },
-  "energy_recover_seconds": {
-    "type": "int",
-    "description": "恢复 1 点能量所需秒数",
-    "default": 30,
-    "hint": "仅能量模式生效。每经过设置的秒数恢复 1 点；默认每 30 秒恢复 1 点，最多恢复到每群能量上限。",
-    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
-    "obvious_hint": true
-  },
-  "energy_threshold": {
-    "type": "string",
-    "description": "主动抽样能量门槛",
-    "default": "50",
-    "hint": "仅能量模式生效。普通群消息先通过概率抽样，再检查该群能量；达到门槛后才请求判断模型。留空时门槛自动使用“主动回复成功后消耗能量”设置的数值。能量不足时记录结果，并跳过判断模型和默认主模型请求。明确命中关键词或正则不受此门槛限制。",
-    "condition": {"active_reply_enabled": true, "limiter_mode": "能量模式"},
     "obvious_hint": true
   },
   "followup_enabled": {
     "type": "bool",
     "description": "启用同一发送者消息跟进",
     "default": true,
-    "hint": "开启后，本插件群聊回复或普通 @BOT 回复成功后，会在设定时间内自动回复同一发送者的后续消息。关闭后会清除现有窗口，不再创建或触发跟进。",
+    "hint": "本插件允许的回复发送成功后，为同一发送者开启跟进窗口。关闭会清除现有窗口。",
     "obvious_hint": true
   },
   "followup_judge_enabled": {
     "type": "bool",
     "description": "跟进窗口消息启用回复判断",
     "default": true,
-    "hint": "默认开启，窗口内消息先经过“是否值得回复”判断；即使消息带有 @BOT，也可能因判断为不值得而跳过主模型。判断器故障时按明确触发规则放行。关闭后窗口内消息直接进入 AstrBot 回复流程。关键词、正则和主动抽样仍会被绕过。",
+    "hint": "窗口内消息是否也先经过判断器。关闭后直接进入 AstrBot 回复流程。",
     "condition": {"followup_enabled": true, "judge_enabled": true},
     "obvious_hint": true
   },
@@ -205,7 +213,7 @@
     "type": "int",
     "description": "同一发送者跟进窗口时长（秒）",
     "default": 30,
-    "hint": "本插件群聊回复或普通 @BOT 的 AstrBot 回复成功发送后，为该群的原发送者开启窗口。窗口内消息绕过关键词、正则和主动抽样；是否经过回复判断由上方开关控制，开启时即使窗口消息带有 @BOT 也可能被拦截。AstrBot 重启后窗口清空。",
+    "hint": "跟进窗口持续时间，按群号和发送者分别计时；重启后清空。",
     "condition": {"followup_enabled": true},
     "obvious_hint": true
   },
@@ -213,7 +221,7 @@
     "type": "bool",
     "description": "跟进窗口内续聊后刷新计时",
     "default": false,
-    "hint": "默认关闭，以降低多个机器人互相续聊的风险。开启后，同一发送者在窗口内发来消息时立即重新计算完整窗口时长。",
+    "hint": "开启后，窗口内再次收到该发送者消息时重新计算完整时长。默认关闭，以降低机器人互相续聊风险。",
     "condition": {"followup_enabled": true},
     "obvious_hint": true
   }

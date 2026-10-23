@@ -208,17 +208,19 @@ class SmartReplyGatePlugin(Star):
         )
         if random.random() * 100.0 >= probability:
             event.should_call_llm(True)
+            if self._bool_config("debug_sample_logging", False):
+                logger.info(
+                    "[智能回复门控] 会话=%s 来源=主动抽样 结果=未抽中 概率=%.1f%% 跳过判断和主模型",
+                    self._session(event),
+                    probability,
+                )
+            return
+        if self._bool_config("debug_sample_logging", False):
             logger.info(
-                "[智能回复门控] 会话=%s 来源=主动抽样 结果=未抽中 概率=%.1f%% 跳过判断和主模型",
+                "[智能回复门控] 会话=%s 来源=主动抽样 结果=抽中 概率=%.1f%%",
                 self._session(event),
                 probability,
             )
-            return
-        logger.info(
-            "[智能回复门控] 会话=%s 来源=主动抽样 结果=抽中 概率=%.1f%%",
-            self._session(event),
-            probability,
-        )
 
         # 先抽样，再检查冷却/能量，避免为未抽中的群消息请求判断模型。
         if not await self._active_limiter_allowed(group_id, now):
