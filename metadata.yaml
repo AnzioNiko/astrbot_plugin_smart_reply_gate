@@ -2,6 +2,6 @@ name: astrbot_plugin_smart_reply_gate
 display_name: 更智能的回复
 desc: 关键词、正则触发与群聊主动回复门控
 help: 关键词和正则在消息任意位置匹配，并与 AstrBot 官方唤醒词区分；主动回复默认关闭。
-version: v0.1.0
+version: v0.1.1
 author: Anzio
 repo: "https://github.com/AnzioNiko/astrbot_plugin_smart_reply_gate"
