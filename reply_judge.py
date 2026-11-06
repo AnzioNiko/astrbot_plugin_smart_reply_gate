@@ -141,10 +141,18 @@ class ReplyJudge:
     async def _judge_typesafe(
         self, state: dict[str, Any], log_context: str
     ) -> dict[str, Any]:
-        api_key = os.environ.get("TYPESAFE_API_KEY", "").strip()
+        api_key_env = (
+            str(self.config.get("typesafe_api_key_env", "TYPESAFE_API_KEY")).strip()
+            or "TYPESAFE_API_KEY"
+        )
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", api_key_env) is None:
+            raise RuntimeError(
+                "TypeSafe API Key 环境变量名无效；请填写变量名，不要填写密钥本身"
+            )
+        api_key = os.environ.get(api_key_env, "").strip()
         if not api_key:
             raise RuntimeError(
-                "未在 AstrBot 进程环境变量中设置 TYPESAFE_API_KEY"
+                f"未在 AstrBot 进程环境变量中设置 {api_key_env}"
             )
 
         try:
@@ -154,10 +162,24 @@ class ReplyJudge:
                 "TypeSafe SDK 未安装；请按插件 requirements.txt 安装依赖后重启 AstrBot"
             ) from exc
 
-        model_id = str(self.config.get("typesafe_model_id", "jev-latest")).strip() or "jev-latest"
+        model_id = (
+            str(self.config.get("typesafe_model_id", "jev-latest")).strip()
+            or "jev-latest"
+        )
+        base_url = (
+            str(
+                self.config.get("typesafe_base_url", "https://api.typesafe.ai")
+                or ""
+            )
+            .strip()
+            .rstrip("/")
+        )
+        client_args: dict[str, Any] = {"api_key": api_key}
+        if base_url:
+            client_args["base_url"] = base_url
         classifier = TypeSafeClassifier(
             model_id=model_id,
-            client_args={"api_key": api_key},
+            client_args=client_args,
         )
         try:
             instructions = self._instructions()

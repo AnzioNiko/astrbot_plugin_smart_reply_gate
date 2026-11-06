@@ -136,11 +136,27 @@
     "condition": {"judge_enabled": true, "judge_mode": "AstrBot Provider"},
     "obvious_hint": true
   },
+  "typesafe_base_url": {
+    "type": "string",
+    "description": "TypeSafe API 基础地址",
+    "default": "https://api.typesafe.ai",
+    "hint": "官方默认 https://api.typesafe.ai；自定义代理会接收 API Key，请只填可信根地址，不包含 /v1/systemone。",
+    "condition": {"judge_enabled": true, "judge_mode": "TypeSafe"},
+    "obvious_hint": true
+  },
+  "typesafe_api_key_env": {
+    "type": "string",
+    "description": "TypeSafe API Key 环境变量名",
+    "default": "TYPESAFE_API_KEY",
+    "hint": "填写保存密钥的环境变量名，不要填写密钥本身。新增或修改系统环境变量后需重启 AstrBot。",
+    "condition": {"judge_enabled": true, "judge_mode": "TypeSafe"},
+    "obvious_hint": true
+  },
   "typesafe_model_id": {
     "type": "string",
-    "description": "TypeSafe 模型 ID",
+    "description": "JEV 模型 ID",
     "default": "jev-latest",
-    "hint": "默认 jev-latest。API Key 从环境变量 TYPESAFE_API_KEY 读取，不保存在插件设置中。",
+    "hint": "填写订阅中的 JEV 模型 ID；默认 jev-latest，也可填写固定版本。",
     "condition": {"judge_enabled": true, "judge_mode": "TypeSafe"},
     "obvious_hint": true
   },
@@ -199,6 +215,14 @@
     "description": "启用同一发送者消息跟进",
     "default": true,
     "hint": "本插件允许的回复发送成功后，为同一发送者开启跟进窗口。关闭会清除现有窗口。",
+    "obvious_hint": true
+  },
+  "followup_explicit_only": {
+    "type": "bool",
+    "description": "仅明确触发的回复开启跟进窗口",
+    "default": true,
+    "hint": "默认开启。仅关键词、@BOT 或引用BOT本人的回复开启窗口；随机主动回复不开启。关闭后随机主动回复也可开启。",
+    "condition": {"followup_enabled": true},
     "obvious_hint": true
   },
   "followup_judge_enabled": {

@@ -37,8 +37,10 @@ class SmartReplyGatePlugin(Star):
         self.regex_patterns: list[re.Pattern[str]] = []
         self._compile_patterns(self._parse_lines(self.config.get("regex_rules", "")))
         self.fixed_cooldowns: dict[str, float] = {}
+        self.active_reservations: dict[str, float] = {}
         self.followup_windows: dict[tuple[str, str], float] = {}
         self.energy: dict[str, dict[str, float]] = {}
+        self.active_admission_lock = asyncio.Lock()
         self.energy_lock = asyncio.Lock()
         self.data_dir = self._get_data_dir()
         self.energy_file = self.data_dir / "group_energy.json"
@@ -192,7 +194,14 @@ class SmartReplyGatePlugin(Star):
                     source = "引用机器人消息"
                 await self._judge_and_route(event, source, explicit=True)
             else:
-                self._set_meta(event, {"ordinary_mention": True, "group_id": group_id})
+                self._set_meta(
+                    event,
+                    {
+                        "ordinary_mention": True,
+                        "followup_origin": "explicit",
+                        "group_id": group_id,
+                    },
+                )
             return
 
         # @其他人或引用他人消息与普通群消息一样，先经过主动回复抽样和限频。
@@ -222,16 +231,18 @@ class SmartReplyGatePlugin(Star):
                 probability,
             )
 
-        # 先抽样，再检查冷却/能量，避免为未抽中的群消息请求判断模型。
-        if not await self._active_limiter_allowed(group_id, now):
+        # 抽中后以群为单位预留主动回复，防止主模型生成期间重复进入判断。
+        if not await self._reserve_active_admission(group_id, now):
             event.should_call_llm(True)
             logger.info(
-                "[智能回复门控] 会话=%s 来源=主动抽样 限频未通过，跳过判断和主模型",
+                "[智能回复门控] 会话=%s 来源=主动抽样 准入未通过，跳过判断和主模型",
                 self._session(event),
             )
             return
 
-        await self._judge_and_route(event, "主动抽样", explicit=False)
+        allowed = await self._judge_and_route(event, "主动抽样", explicit=False)
+        if not allowed:
+            await self._release_active_reservation(group_id)
 
     async def _judge_and_route(
         self,
@@ -240,7 +251,7 @@ class SmartReplyGatePlugin(Star):
         explicit: bool,
         is_followup: bool = False,
         followup_expiry: float = 0.0,
-    ):
+    ) -> bool:
         if not self._bool_config("judge_enabled", True):
             logger.info(
                 "[智能回复门控] 会话=%s 来源=%s 判断器总开关关闭 结果=直接放行主模型",
@@ -253,7 +264,7 @@ class SmartReplyGatePlugin(Star):
                 is_followup=is_followup,
                 followup_expiry=followup_expiry,
             )
-            return
+            return True
 
         mode = self.judge.mode
         try:
@@ -287,6 +298,7 @@ class SmartReplyGatePlugin(Star):
                     is_followup=is_followup,
                     followup_expiry=followup_expiry,
                 )
+                return True
             else:
                 logger.error(
                     "[智能回复门控] 会话=%s 来源=%s 模式=%s 判断失败：%s；回退=跳过回复",
@@ -296,7 +308,7 @@ class SmartReplyGatePlugin(Star):
                     exc,
                 )
                 event.should_call_llm(True)
-            return
+                return False
 
         score = decision.get("score")
         threshold = decision.get("threshold")
@@ -319,8 +331,10 @@ class SmartReplyGatePlugin(Star):
                 is_followup=is_followup,
                 followup_expiry=followup_expiry,
             )
+            return True
         else:
             event.should_call_llm(True)
+            return False
 
     def _allow_default_reply(
         self,
@@ -342,6 +356,13 @@ class SmartReplyGatePlugin(Star):
                 "followup_expiry": followup_expiry
                 or self.followup_windows.get((group_id, sender_id), 0.0),
                 "is_followup": is_followup,
+                "followup_origin": (
+                    "followup"
+                    if is_followup
+                    else "active"
+                    if source == "主动抽样"
+                    else "explicit"
+                ),
             },
         )
         event.should_call_llm(False)
@@ -388,6 +409,7 @@ class SmartReplyGatePlugin(Star):
                 "sent": False,
                 "followup_expiry": expiry,
                 "is_followup": True,
+                "followup_origin": "followup",
             },
         )
         event.should_call_llm(False)
@@ -431,7 +453,10 @@ class SmartReplyGatePlugin(Star):
         group_id = str(meta.get("group_id") or self._group_id(event))
         sender_id = str(meta.get("sender_id") or self._sender_id(event))
         if plugin_trigger and meta.get("source") == "主动抽样":
-            await self._record_active_success(group_id)
+            try:
+                await self._record_active_success(group_id)
+            finally:
+                await self._release_active_reservation(group_id)
 
         if (
             self._bool_config("followup_enabled", True)
@@ -441,7 +466,9 @@ class SmartReplyGatePlugin(Star):
             now = time.time()
             key = (group_id, sender_id)
             is_followup = bool(meta.get("is_followup"))
-            if not is_followup:
+            followup_origin = str(meta.get("followup_origin", "explicit"))
+            explicit_only = self._bool_config("followup_explicit_only", True)
+            if not is_followup and (not explicit_only or followup_origin == "explicit"):
                 duration = max(1, self._int_config("followup_seconds", 30))
                 self.followup_windows[key] = now + duration
                 logger.info(
@@ -450,6 +477,13 @@ class SmartReplyGatePlugin(Star):
                     sender_id,
                     duration,
                     meta.get("source", "普通@BOT"),
+                )
+            elif not is_followup:
+                logger.info(
+                    "[智能回复门控] 群=%s 发送者=%s 跟进窗口未开启 原因=随机主动回复 来源=%s",
+                    group_id,
+                    sender_id,
+                    meta.get("source", "主动抽样"),
                 )
 
     async def _active_limiter_allowed(self, group_id: str, now: float) -> bool:
@@ -485,6 +519,38 @@ class SmartReplyGatePlugin(Star):
             )
             return False
         return True
+
+    async def _reserve_active_admission(self, group_id: str, now: float) -> bool:
+        if not group_id:
+            return False
+        async with self.active_admission_lock:
+            self._prune_active_reservations(now)
+            if group_id in self.active_reservations:
+                logger.info(
+                    "[智能回复门控] 群=%s 来源=主动抽样 结果=已有主动回复处理中 跳过判断和主模型",
+                    group_id,
+                )
+                return False
+            if not await self._active_limiter_allowed(group_id, now):
+                return False
+            self.active_reservations[group_id] = now
+            return True
+
+    async def _release_active_reservation(self, group_id: str):
+        if not group_id:
+            return
+        async with self.active_admission_lock:
+            self.active_reservations.pop(group_id, None)
+
+    def _prune_active_reservations(self, now: float):
+        ttl = 300.0
+        expired = [
+            group_id
+            for group_id, reserved_at in self.active_reservations.items()
+            if now - reserved_at >= ttl
+        ]
+        for group_id in expired:
+            self.active_reservations.pop(group_id, None)
 
     async def _record_active_success(self, group_id: str):
         if not group_id:
